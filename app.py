@@ -1,51 +1,51 @@
+import openai
 import os
 from dotenv import load_dotenv
 from flask import Flask, request
 from twilio.rest import Client
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 # Load environment variables
 load_dotenv()
+
+# OpenAI setup
+openai_api_key = os.getenv('OPENAI_API_KEY')
 
 # Twilio setup
 account_sid = os.getenv('TWILIO_ACCOUNT_SID')
 auth_token = os.getenv('TWILIO_AUTH_TOKEN')
 twilio_whatsapp_number = os.getenv('TWILIO_WHATSAPP_NUMBER')
 
-if not all([account_sid, auth_token, twilio_whatsapp_number]):
+if not all([openai_api_key, account_sid, auth_token, twilio_whatsapp_number]):
     raise ValueError("Missing required environment variables. Please check your .env file.")
 
-client = Client(account_sid, auth_token)
-
-# Load a different pre-trained model for text generation
-model_name = "gpt2"  # Use a model suitable for text generation
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name)
-generator = pipeline('text-generation', model=model, tokenizer=tokenizer)
+twilio_client = Client(account_sid, auth_token)
 
 app = Flask(__name__)
 
-def create_cybersecurity_prompt(user_message):
-    return f"""
-Pertanyaan tentang keamanan siber: {user_message}
+# Instantiate the OpenAI client
+client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-Jawaban yang informatif dan relevan tentang keamanan siber:
-1. """
+def create_cybersecurity_prompt(user_message):
+    return f"Pertanyaan tentang keamanan siber: {user_message}"
 
 def generate_response(prompt):
-    response = generator(prompt, max_length=200, num_return_sequences=1, temperature=0.7, do_sample=True, truncation=True)
-    response_text = response[0]['generated_text'].split("1. ")[-1].strip()
-    
-    # Basic post-processing
-    sentences = response_text.split('.')
-    unique_sentences = list(dict.fromkeys(sentences))  # Remove duplicates
-    cleaned_response = '. '.join(sentence.strip() for sentence in unique_sentences if len(sentence.strip()) > 10)
-    
-    return cleaned_response if cleaned_response else "Maaf, saya tidak dapat memberikan jawaban yang tepat. Silakan coba pertanyaan lain tentang keamanan siber."
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Anda adalah konsultan ahli keamanan siber."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=50  # Adjust max tokens as needed
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"Error generating response: {str(e)}")
+        return "Maaf, saya tidak dapat memberikan jawaban yang tepat. Silakan coba pertanyaan lain tentang keamanan siber."
 
 def send_whatsapp_message(to_number, message_body):
     try:
-        message = client.messages.create(
+        message = twilio_client.messages.create(
             from_=f'whatsapp:{twilio_whatsapp_number}',
             body=message_body,
             to=to_number
