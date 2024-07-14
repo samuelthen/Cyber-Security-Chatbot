@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from flask import Flask, request
 from twilio.rest import Client
+from collections import defaultdict, deque
 
 # Load environment variables
 load_dotenv()
@@ -25,18 +26,25 @@ app = Flask(__name__)
 # Instantiate the OpenAI client
 client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
+conversations = defaultdict(lambda: deque(maxlen=2))  # Limit conversation history to the last 2 messages
+
 def create_cybersecurity_prompt(user_message):
     return f"Pertanyaan tentang keamanan siber: {user_message}"
 
-def generate_response(prompt):
+def generate_response(user_id, prompt):
     try:
+        messages = [{"role": "system", "content": "Anda adalah konsultan ahli keamanan siber yang memberikan tanggapan singkat."}]
+        
+        # Add the last two messages to the context
+        if user_id in conversations:
+            messages.extend(conversations[user_id])
+        
+        messages.append({"role": "user", "content": prompt})
+    
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Anda adalah konsultan ahli keamanan siber."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=50  # Adjust max tokens as needed
+            model="gpt-3.5-turbo-0125",
+            messages=messages,
+            max_tokens=100  # Adjust max tokens as needed
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -66,8 +74,13 @@ def webhook():
         prompt = create_cybersecurity_prompt(incoming_msg)
         print(f"Generated prompt: {prompt}")
         
-        response_text = generate_response(prompt)
+        response_text = generate_response(sender, prompt)
         print(f"Generated response: {response_text}")
+
+        # Save the conversation
+        conversations[sender].append({"role": "user", "content": prompt})
+        conversations[sender].append({"role": "assistant", "content": response_text})
+
     else:
         response_text = "Maaf, saya tidak mengerti. Tolong ulangi pertanyaan Anda tentang keamanan siber."
     
